@@ -6,7 +6,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  actions: write
   statuses: read
   checks: read
   deployments: read
@@ -26,27 +27,62 @@ jobs:
     steps:
       - name: Checkout verified source
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
+      - name: Detect tracked dependency lock
+        id: lock_state
+        shell: bash
+        run: |
+          if git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
+            echo "tracked=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tracked=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install project and QA dependencies
-        run: npm install --no-audit --no-fund
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.lock_state.outputs.tracked }}" == "true" ]]; then
+            npm ci --no-audit --no-fund
+          else
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Bootstrap deterministic package lock
+        id: lock_bootstrap
+        if: steps.lock_state.outputs.tracked == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "Add deterministic dependency lock"
+          git push origin HEAD:main
+          echo "bootstrapped=true" >> "$GITHUB_OUTPUT"
+          echo "A deterministic package-lock.json was committed. Dispatching QA on the new main commit." >> "$GITHUB_STEP_SUMMARY"
+          gh workflow run production-qa.yml --ref main
 
       - name: Preserve resolved dependency lock
+        if: steps.lock_bootstrap.outputs.bootstrapped != 'true'
         shell: bash
         run: |
           mkdir -p qa-artifacts
-          if [[ -f package-lock.json ]]; then
-            cp package-lock.json qa-artifacts/package-lock.generated.json
-          fi
+          cp package-lock.json qa-artifacts/package-lock.generated.json
 
       - name: Install Chromium
+        if: steps.lock_bootstrap.outputs.bootstrapped != 'true'
         run: npx playwright install --with-deps chromium
 
       - name: Wait for Vercel deployment for this commit
+        if: steps.lock_bootstrap.outputs.bootstrapped != 'true'
         shell: bash
         run: |
           set -uo pipefail
@@ -76,6 +112,7 @@ jobs:
           fi
 
       - name: Wait for canonical production URL
+        if: steps.lock_bootstrap.outputs.bootstrapped != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -94,10 +131,11 @@ jobs:
 
       - name: Run multi-viewport production QA
         id: qa
+        if: steps.lock_bootstrap.outputs.bootstrapped != 'true'
         run: npm run qa:production
 
       - name: Publish QA summary
-        if: always()
+        if: always() && steps.lock_bootstrap.outputs.bootstrapped != 'true'
         shell: bash
         run: |
           if [[ -f qa-artifacts/qa-summary.md ]]; then
@@ -107,7 +145,7 @@ jobs:
           fi
 
       - name: Upload QA evidence
-        if: always()
+        if: always() && steps.lock_bootstrap.outputs.bootstrapped != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: production-qa-${{ github.sha }}
