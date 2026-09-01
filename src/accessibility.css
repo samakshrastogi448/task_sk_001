@@ -16,6 +16,25 @@
   opacity: 0.76;
 }
 
+/* The giant RAIN word is atmospheric decoration, not readable content.
+   Render the visible lettering as generated decoration while making the source
+   text node non-visual, preserving the original low-contrast cinematic effect
+   without presenting decorative text as meaningful foreground content. */
+.rain-word {
+  color: transparent;
+  font-size: 0;
+}
+
+.rain-word::before {
+  content: 'RAIN';
+  display: block;
+  font-family: 'Italiana', serif;
+  font-size: clamp(11rem, 33vw, 34rem);
+  letter-spacing: -0.08em;
+  color: rgba(183, 203, 197, 0.07);
+  white-space: nowrap;
+}
+
 /* Give keyboard users a visible focus indicator even on image-heavy scenes. */
 a:focus-visible,
 button:focus-visible {
