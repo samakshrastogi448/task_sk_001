@@ -10,14 +10,14 @@
     "qa:production": "node qa/production-qa.mjs"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "gsap": "latest",
-    "vite": "latest",
-    "react": "latest",
-    "react-dom": "latest"
+    "@vitejs/plugin-react": "6.1.1",
+    "gsap": "3.15.0",
+    "vite": "8.2.2",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.10.2",
-    "@playwright/test": "^1.55.0"
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.62.1"
   }
 }
