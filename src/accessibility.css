@@ -1,0 +1,24 @@
+/* Release QA accessibility overrides.
+   Keep these targeted so the core art direction remains unchanged. */
+
+/* Small dark copy on the saffron procession scene was being faded below
+   WCAG AA contrast. Preserve the same color language with stronger opacity. */
+.procession-copy p {
+  opacity: 0.9;
+}
+
+.procession-copy .eyebrow {
+  opacity: 0.92;
+}
+
+/* Tiny finale credits need extra contrast, especially across the radial gradient. */
+.credits {
+  opacity: 0.76;
+}
+
+/* Give keyboard users a visible focus indicator even on image-heavy scenes. */
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid #f3eee4;
+  outline-offset: 4px;
+}
