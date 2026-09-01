@@ -27,6 +27,43 @@ const report = {
   summary: { blockers: 0, majors: 0, warnings: 0, pass: false },
 };
 
+async function enterExperience(page) {
+  const check = { attempted: false, success: null, error: null };
+  const button = page.locator('button:visible').first();
+  if ((await button.count()) === 0) return check;
+
+  check.attempted = true;
+  try {
+    await button.click({ timeout: 5_000 });
+    await page.waitForTimeout(650);
+    check.success = true;
+  } catch (error) {
+    check.success = false;
+    check.error = error.message;
+  }
+  return check;
+}
+
+async function sweepStory(page, viewportHeight) {
+  const pageHeight = await page.evaluate(() =>
+    Math.max(
+      document.body.scrollHeight,
+      document.documentElement.scrollHeight,
+      document.body.offsetHeight,
+      document.documentElement.offsetHeight,
+    ),
+  );
+
+  const step = Math.max(360, Math.floor(viewportHeight * 0.72));
+  for (let y = 0; y < pageHeight; y += step) {
+    await page.evaluate((scrollY) => window.scrollTo(0, scrollY), y);
+    await page.waitForTimeout(130);
+  }
+
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  await page.waitForTimeout(350);
+}
+
 const browser = await chromium.launch({ headless: true });
 
 for (const viewport of viewports) {
@@ -66,6 +103,21 @@ for (const viewport of viewports) {
     await page.waitForTimeout(800);
   } catch (error) {
     navigationError = error.message;
+  }
+
+  if (!navigationError && viewport.name === 'mobile') {
+    await page.screenshot({
+      path: path.join(outDir, 'mobile-entry.png'),
+      fullPage: false,
+    });
+  }
+
+  const interactionCheck = navigationError
+    ? { attempted: false, success: null, error: null }
+    : await enterExperience(page);
+
+  if (!navigationError) {
+    await sweepStory(page, viewport.height);
   }
 
   const metrics = navigationError
@@ -125,29 +177,9 @@ for (const viewport of viewports) {
 
   if (!navigationError) {
     await page.screenshot({
-      path: path.join(outDir, `${viewport.name}-${viewport.width}x${viewport.height}.png`),
+      path: path.join(outDir, `${viewport.name}-${viewport.width}x${viewport.height}-after-scroll.png`),
       fullPage: true,
     });
-  }
-
-  let interactionCheck = { attempted: false, success: null, error: null };
-  if (!navigationError && viewport.name === 'mobile') {
-    const firstButton = page.locator('button:visible').first();
-    if ((await firstButton.count()) > 0) {
-      interactionCheck.attempted = true;
-      try {
-        await firstButton.click({ timeout: 5_000 });
-        await page.waitForTimeout(500);
-        interactionCheck.success = true;
-        await page.screenshot({
-          path: path.join(outDir, 'mobile-after-entry.png'),
-          fullPage: true,
-        });
-      } catch (error) {
-        interactionCheck.success = false;
-        interactionCheck.error = error.message;
-      }
-    }
   }
 
   const status = response?.status() ?? null;
@@ -234,11 +266,13 @@ try {
   });
   reducedStatus = response?.status() ?? null;
   await reducedPage.waitForTimeout(700);
+  await enterExperience(reducedPage);
+  await sweepStory(reducedPage, 768);
   reducedVisible = await reducedPage.evaluate(() =>
     Boolean(document.body && document.body.innerText.trim().length > 0),
   );
   await reducedPage.screenshot({
-    path: path.join(outDir, 'reduced-motion.png'),
+    path: path.join(outDir, 'reduced-motion-after-scroll.png'),
     fullPage: true,
   });
 } catch (error) {
@@ -288,6 +322,7 @@ const markdown = [
     return [
       `## ${item.name} ${item.width}×${item.height}`,
       `- HTTP: ${item.status ?? 'n/a'}`,
+      `- Entry interaction: ${item.interactionCheck.attempted ? (item.interactionCheck.success ? 'PASS' : 'FAIL') : 'not present'}`,
       `- Overflow: ${item.metrics?.horizontalOverflowPx ?? 'n/a'}px`,
       `- Transfer: ${item.metrics?.totalTransferMb ?? 'n/a'} MB`,
       `- Blockers: ${item.blockers.length ? item.blockers.join('; ') : '0'}`,
