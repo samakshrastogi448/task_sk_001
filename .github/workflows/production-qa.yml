@@ -1,0 +1,111 @@
+name: Production QA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: read
+  checks: read
+  deployments: read
+
+concurrency:
+  group: production-qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  production-qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PRODUCTION_URL: https://tasksk001.vercel.app
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout verified source
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: package-lock.json
+        continue-on-error: true
+
+      - name: Install project and QA dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Wait for Vercel deployment for this commit
+        shell: bash
+        run: |
+          set -uo pipefail
+          echo "Waiting for Vercel result for commit ${GITHUB_SHA}"
+          vercel_seen=0
+          for attempt in $(seq 1 40); do
+            status_state=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/status" --jq '[.statuses[] | select(.context | test("Vercel"; "i"))][0].state // ""' 2>/dev/null || true)
+            check_state=$(gh api -H 'Accept: application/vnd.github+json' "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs" --jq '[.check_runs[] | select(.name | test("Vercel"; "i"))][0].conclusion // ""' 2>/dev/null || true)
+
+            if [[ "${status_state}" == "success" || "${check_state}" == "success" ]]; then
+              echo "Vercel reports success for ${GITHUB_SHA}"
+              vercel_seen=1
+              break
+            fi
+
+            if [[ "${status_state}" == "failure" || "${status_state}" == "error" || "${check_state}" == "failure" || "${check_state}" == "cancelled" ]]; then
+              echo "Vercel reports a failed deployment for ${GITHUB_SHA}"
+              exit 1
+            fi
+
+            echo "Attempt ${attempt}/40: Vercel status not successful yet"
+            sleep 15
+          done
+
+          if [[ "${vercel_seen}" -eq 0 ]]; then
+            echo "Vercel commit metadata was not visible within the wait window; continuing with canonical URL verification."
+          fi
+
+      - name: Wait for canonical production URL
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            code=$(curl -L -sS -o /tmp/project.html -w '%{http_code}' --max-time 25 "${PRODUCTION_URL}" || true)
+            bytes=$(wc -c < /tmp/project.html 2>/dev/null || echo 0)
+            if [[ "${code}" =~ ^2|3 && "${bytes}" -gt 100 ]]; then
+              echo "Production URL is live: HTTP ${code}, ${bytes} bytes"
+              exit 0
+            fi
+            echo "Attempt ${attempt}/30: HTTP ${code:-n/a}, bytes ${bytes}"
+            sleep 10
+          done
+          echo "Production URL did not become healthy in time"
+          exit 1
+
+      - name: Run multi-viewport production QA
+        id: qa
+        run: npm run qa:production
+
+      - name: Publish QA summary
+        if: always()
+        shell: bash
+        run: |
+          if [[ -f qa-artifacts/qa-summary.md ]]; then
+            cat qa-artifacts/qa-summary.md >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo 'QA summary was not produced.' >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Upload QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-qa-${{ github.sha }}
+          path: qa-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
