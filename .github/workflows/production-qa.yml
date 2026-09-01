@@ -35,6 +35,14 @@ jobs:
       - name: Install project and QA dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Preserve resolved dependency lock
+        shell: bash
+        run: |
+          mkdir -p qa-artifacts
+          if [[ -f package-lock.json ]]; then
+            cp package-lock.json qa-artifacts/package-lock.generated.json
+          fi
+
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
